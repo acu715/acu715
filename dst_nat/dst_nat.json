@@ -1,0 +1,50 @@
+﻿[
+    {
+        "ID": 0,
+        "Useage": "CentOS-1Panel",
+        "OUT_Port": 20001,
+        "IN_Port": 17069
+    },
+    {
+        "ID": 1,
+        "Useage": "CentOS-QingLong",
+        "OUT_Port": 20002,
+        "IN_Port": 28886
+    },
+    {
+        "ID": 2,
+        "Useage": "CentOS-SSR",
+        "OUT_Port": 20003,
+        "IN_Port": 2333
+    },
+    {
+        "ID": 3,
+        "Useage": "CentOS-SSH",
+        "OUT_Port": 20004,
+        "IN_Port": 22
+    },
+    {
+        "ID": 4,
+        "Useage": "PVE",
+        "OUT_Port": 8006,
+        "IN_Port": 8006
+    },
+    {
+        "ID": 5,
+        "Useage": "Windows-LAPTOP-BJELECHL-Lan-RDP",
+        "OUT_Port": 21001,
+        "IN_Port": 3389
+    },
+    {
+        "ID": 6,
+        "Useage": "Windows-LAPTOP-BJELECHL-WIFI-RDP",
+        "OUT_Port": 21002,
+        "IN_Port": 3389
+    },
+    {
+        "ID": 7,
+        "Useage": "Windows-LAPTOP-6EI8GE0N-RDP-WIFI",
+        "OUT_Port": 21003,
+        "IN_Port": 3389
+    }
+]

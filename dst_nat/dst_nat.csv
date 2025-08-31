@@ -1,0 +1,9 @@
+id,enabled,comment,interface,src_addr,lan_addr,protocol,wan_port,lan_port
+1,"yes","PVE","wan1","","192.168.50.3","tcp+udp","8006","8006"
+2,"yes","CentOS-1Panel","wan1","","192.168.50.2","tcp+udp","20001","17069"
+3,"yes","CentOS-QingLong","wan1","","192.168.50.2","tcp+udp","20002","28886"
+4,"yes","CentOS-SSR","wan1","","192.168.50.2","tcp","20003","2333"
+5,"yes","Windows-LAPTOP-BJELECHL-Lan-RDP","wan1","","192.168.50.18","tcp+udp","21001","3389"
+6,"yes","Windows-LAPTOP-BJELECHL-WIFI-RDP","wan1","","192.168.50.15","tcp+udp","21002","3389"
+7,"yes","Windows-LAPTOP-6EI8GE0N-RDP-WIFI","wan1","","192.168.50.13","tcp+udp","21003","3389"
+8,"yes","CentOS-SSH","wan1","","192.168.50.2","tcp+udp","20004","22"

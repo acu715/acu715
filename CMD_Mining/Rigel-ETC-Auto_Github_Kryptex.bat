@@ -1,6 +1,9 @@
 ﻿@echo off
 setlocal enabledelayedexpansion
 
+if "%1"=="h" goto begin
+start mshta vbscript:createobject("wscript.shell").run("""%~nx0"" h",0)(window.close)&&exit
+:begin
 :: 2. 解决部分win11/win10英文系统电脑打开为非正常中文字问题
 :: 设置控制台代码页为UTF-8，确保中文正确显示
 chcp 65001 >nul

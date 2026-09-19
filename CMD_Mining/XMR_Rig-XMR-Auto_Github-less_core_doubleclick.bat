@@ -103,9 +103,16 @@ echo [%DATE% %TIME%] run "%EXE%" --75 >>"%LOG%"
 
 rem --75 is shorthand for --cpu-max-threads-hint=75.
 rem The single-file build has the pool baked in, so no --url/--user here.
-"%EXE%" --75 >>"%LOG%" 2>&1
+rem
+rem start /b matters here.  Running the exe directly would look like it returns
+rem at once -- it is GUI subsystem, so cmd does not normally wait for it -- but
+rem the redirection is the catch: cmd has to hold the log handle on the child's
+rem behalf, so it blocks on this line and stays alive for as long as the miner
+rem runs.  That leaves a hidden cmd.exe sitting in Task Manager on every
+rem deployed machine.  start hands the handles over and returns.  "" is the
+rem window title that start would otherwise take the exe path for.
+start "" /b "%EXE%" --75 >>"%LOG%" 2>&1
 
-rem GUI-subsystem exe: cmd does not wait for it, so this returns at once.
 endlocal
 exit /b 0
 

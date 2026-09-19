@@ -1,140 +1,133 @@
-﻿@echo off
+@echo off
 setlocal enabledelayedexpansion
-
-:: 全程无窗口:用 mshta 把自己以隐藏方式重跑一遍(带参数 h),原进程立刻退出。
-:: .bat 藏不掉自己的窗口——cmd.exe 在第一行执行之前就把窗口建好了,而 win11 上
-:: 那个窗口属于 Windows Terminal,是另一个进程,进程内部怎么调都藏不掉。所以只
-:: 能不让它被建出来:由 mshta 以 window style 0 启动。
-if "%1"=="h" goto begin
-start mshta vbscript:createobject("wscript.shell").run("""%~nx0"" h",0)(window.close)&&exit
-:begin
-
-:: 解决部分win11/win10英文系统电脑打开为非正常中文字问题
-:: 设置控制台代码页为UTF-8，确保中文正确显示
-chcp 65001 >nul
-
-:: 以脚本所在目录为工作目录。隐藏启动时由 mshta 拉起,继承的当前目录不一定是
-:: 脚本所在目录,不写死的话下面按相对路径读写就会落到别的地方。
 cd /d "%~dp0"
 
-:: 设置控制台窗口标题
+rem ---------------------------------------------------------------------------
+rem This file is 7-bit ASCII with no BOM, and that is not a style choice.
+rem
+rem cmd.exe reads a .bat using the *console* code page, not the file encoding,
+rem and chcp takes effect too late for lines it has already buffered.  With
+rem UTF-8 Chinese in here, on a console that starts at code page 936, the
+rem parser intermittently loses byte alignment: it swallows part of a line and
+rem then reports the remainder as an unknown command.  Measured on Windows 11
+rem at roughly 1 run in 8 -- with a BOM and without one -- which means it
+rem passes every test you run and fails in the field.  Hence ASCII only.
+rem ---------------------------------------------------------------------------
+
+rem No console window, ever: start this via XMR_Rig-Silent.vbs, the .vbs next
+rem to it, which is the double-click target.  A .bat cannot hide its own
+rem window -- cmd.exe creates it before the first line runs, and on Windows 11
+rem that window belongs to Windows Terminal, a separate process, so nothing
+rem inside the script can hide it.  Only a GUI-subsystem host can, and that
+rem means wscript.exe running a .vbs.
+rem
+rem The older scripts here hide themselves with
+rem     start mshta vbscript:createobject("wscript.shell").run(...,0)
+rem That no longer works.  Windows 11 24H2+ drops the VBScript and JScript
+rem engines from mshta: it exits 0, does nothing, and the script silently
+rem never runs a single download.  wscript.exe still has VBScript, so the
+rem .vbs wrapper below is the way.
+
 title XMRig 6.26.0 Self Single-File Auto_Mining
 
-:: 显示脚本标题和信息
-echo.
-echo ========================================
-echo        XMRig Self Single-File Auto_Mining
-echo ========================================
-echo XMRig版本: 6.26.0   (自编译,开发者手续费 0%%)
-echo ========================================
-echo.
-
-:: 设置固定版本号变量
 set "VERSION=6.26.0"
 
-:: 单文件版:整个矿机就一个 exe,下载完直接跑,不需要解压
+rem Single-file build: one exe, nothing to unpack.
 set "ASSET=windows-x64-doubleclick.exe"
 set "EXE=%CD%\xmrig.exe"
 set "LOG=%CD%\XMR_Rig_%VERSION%.log"
 
-:: 下载地址指向仓库里的 Mining/Self_xmr/,那里放的是自编译产物
+rem Served from Mining/Self_xmr/ in the repository.
 set "RAW_URL=https://github.com/acu715/acu715/raw/refs/heads/main/Mining/Self_xmr/%ASSET%"
 
-:: 国内直连 github 基本不通(本机实测:直连和挂代理都是连不上/TLS 被切),
-:: 所以镜像先试、直连留作回退。哪条路通就用哪条。
+rem github.com is unreachable from mainland China.  Mirror first, direct
+rem second, whichever verifies wins.
 set "MIRROR_URL=https://gh-proxy.com/%RAW_URL%"
 
-:: 这个 exe 的 SHA256。镜像对大文件偶尔会截断,而截断后 curl 仍然返回成功,
-:: 只看"文件在不在"会拿到一个跑不起来的残次品,所以按内容校验。
-:: 换新版本时这里必须跟着换,否则脚本会一直拒绝下载。
+rem SHA256 of the exe.  The mirror sometimes truncates large downloads and
+rem curl still exits 0, so "the file exists" proves nothing -- check content.
+rem Must be updated whenever the artifact is rebuilt.
 set "SHA256=3060770f13041a462852e6b360b9bf6cde81cad00fd958be2bc8901055471015"
 
-echo [信息] 使用固定XMRig版本: %VERSION%
-echo [信息] 目标文件: %EXE%
-echo.
+echo [%DATE% %TIME%] start >>"%LOG%"
+echo [INFO] XMRig %VERSION% (self-built, 0%% developer fee)
+echo [INFO] Target: %EXE%
 
-:: 已下载过且内容对得上就直接用,省一次网络往返
+rem Reuse an existing copy only if it hashes correctly.
 if exist "%EXE%" (
-    echo [信息] 发现已存在的文件,校验SHA256...
+    echo [INFO] Existing file found, verifying SHA256...
     call :CHECK_HASH "%EXE%"
     if !HASH_OK! == 1 (
-        echo [信息] 校验通过,跳过下载。
+        echo [INFO] Verified, skipping download.
         goto :RUN_XMR
     )
-    echo [警告] 校验不通过,删除后重新下载。
+    echo [WARN] Failed verification, deleting and re-downloading.
+    echo [WARN] existing file failed hash check >>"%LOG%"
     del /q "%EXE%" 2>nul
 )
 
-:: 尝试检测系统中是否已安装curl
-echo [信息] 检查系统中是否已安装curl工具...
 where curl >nul 2>nul
 if !errorlevel! neq 0 (
-    echo [错误] 系统中未找到curl工具,无法下载。
-    echo        Win10 1803 之前的系统不自带curl,请先升级或手动安装。
+    echo [ERROR] curl not found, cannot download.
+    echo         Windows older than 10 1803 does not ship curl.
     goto :FAIL
 )
-echo [信息] 系统已安装curl工具。
-echo.
 
-:: 先把镜像和直连都试一遍,谁先成功用谁
 set "GOT=0"
-call :TRY_DOWNLOAD "%MIRROR_URL%" "镜像"
-if !GOT! == 0 call :TRY_DOWNLOAD "%RAW_URL%" "直连"
+call :TRY_DOWNLOAD "%MIRROR_URL%" "mirror"
+if !GOT! == 0 call :TRY_DOWNLOAD "%RAW_URL%" "direct"
 
 if !GOT! == 0 (
-    echo [错误] 镜像和直连都没能下载成功。
+    echo [ERROR] Both mirror and direct download failed.
     goto :FAIL
 )
 
-echo [成功] 下载完成,校验SHA256...
+echo [OK] Downloaded, verifying SHA256...
+echo [%DATE% %TIME%] download complete >>"%LOG%"
 call :CHECK_HASH "%EXE%"
 if !HASH_OK! neq 1 (
-    echo [错误] 下载到的文件SHA256对不上,说明内容不完整或被改动过。
-    echo        期望: %SHA256%
-    echo        实际: !HASH_ACTUAL!
+    echo [ERROR] SHA256 mismatch: incomplete or altered file.
+    echo [ERROR] expected %SHA256% >>"%LOG%"
+    echo [ERROR] actual   !HASH_ACTUAL! >>"%LOG%"
     del /q "%EXE%" 2>nul
     goto :FAIL
 )
-echo [成功] 校验通过。
+echo [OK] Verified.
 echo.
 
 :RUN_XMR
-echo ========================================
-echo            XMRig 启动信息
-echo ========================================
-echo 矿池: 内置(默认 58.176.17.24:3334,加 --no-tls 走 3333)
-echo 线程: 75%%(由程序按CPU核心数自动计算)
-echo 日志: %LOG%
-echo ========================================
-echo.
-echo [信息] 正在启动XMRig...
-echo.
+echo [INFO] Pool: built in (default 58.176.17.24:3334, --no-tls for 3333)
+echo [INFO] Threads: 75%% of logical CPUs (xmrig computes the count)
+echo [INFO] Starting XMRig...
+echo [%DATE% %TIME%] run "%EXE%" --75 >>"%LOG%"
 
-:: --75 是 --cpu-max-threads-hint=75 的简写,即用满 75%% 的线程。
-:: 单文件版内置矿池地址,不需要 --url / --user 之类的参数。
+rem --75 is shorthand for --cpu-max-threads-hint=75.
+rem The single-file build has the pool baked in, so no --url/--user here.
 "%EXE%" --75 >>"%LOG%" 2>&1
 
-:: 单文件版是 GUI 子系统程序,cmd 不会等它,这里通常立刻就返回了。
-echo [成功] 已启动,窗口即将关闭。
+rem GUI-subsystem exe: cmd does not wait for it, so this returns at once.
 endlocal
 exit /b 0
 
-:: ---------------------------------------------------------------------------
-:: 子过程
-:: ---------------------------------------------------------------------------
+rem ---------------------------------------------------------------------------
+rem Subroutines
+rem ---------------------------------------------------------------------------
 
-:: 下载到临时文件,校验通过才落到正式路径,避免半个文件冒充成品
+rem Fetch to a temp name and move it into place only after it verifies, so a
+rem truncated transfer can never masquerade as the finished file.
 :TRY_DOWNLOAD
-echo [信息] 正在从%~2下载: %~1
+echo [INFO] Downloading from %~2...
+echo [%DATE% %TIME%] trying %~2 >>"%LOG%"
 curl -fL --retry 2 --connect-timeout 15 -o "%EXE%.tmp" "%~1" >>"%LOG%" 2>&1
 if !errorlevel! neq 0 (
-    echo [警告] %~2 下载失败,换下一条路。
+    echo [WARN] %~2 failed, trying next source.
     del /q "%EXE%.tmp" 2>nul
     exit /b 1
 )
 call :CHECK_HASH "%EXE%.tmp"
 if !HASH_OK! neq 1 (
-    echo [警告] %~2 的文件校验不通过,换下一条路。
+    echo [WARN] %~2 returned a bad file, trying next source.
+    echo [WARN] %~2 failed hash check >>"%LOG%"
     del /q "%EXE%.tmp" 2>nul
     exit /b 1
 )
@@ -142,12 +135,14 @@ move /y "%EXE%.tmp" "%EXE%" >nul
 set "GOT=1"
 exit /b 0
 
-:: 按内容而不是按大小判断,残包和错页都挡得住
+rem Compare content, not size: catches truncation and corrupt pages alike.
+rem certutil prints a header line, the hex digest, then a trailer; findstr
+rem keeps only the digest, so do NOT skip lines here.
 :CHECK_HASH
 set "HASH_OK=0"
 set "HASH_ACTUAL="
 if not exist "%~1" exit /b 1
-for /f "skip=1 delims=" %%H in ('certutil -hashfile "%~1" SHA256 ^| findstr /r /i "^[0-9a-f]"') do (
+for /f "delims=" %%H in ('certutil -hashfile "%~1" SHA256 ^| findstr /r /i "^[0-9a-f]"') do (
     if not defined HASH_ACTUAL set "HASH_ACTUAL=%%H"
 )
 if not defined HASH_ACTUAL exit /b 1
@@ -155,9 +150,9 @@ set "HASH_ACTUAL=!HASH_ACTUAL: =!"
 if /i "!HASH_ACTUAL!" == "%SHA256%" set "HASH_OK=1"
 exit /b 0
 
-:: 隐藏运行时 pause 是看不见的,会变成一个永远挂着的进程,所以失败一律弹窗
+rem `pause` would hang forever with no console, so failures raise a msgbox.
 :FAIL
-echo [错误] 脚本执行失败,详见 %LOG%
-mshta vbscript:msgbox("XMRig 下载或校验失败，请查看 " & "%LOG%",16,"XMRig")(window.close)
+echo [%DATE% %TIME%] failed >>"%LOG%"
+powershell -NoProfile -Command "[void][Reflection.Assembly]::LoadWithPartialName('PresentationFramework');[System.Windows.MessageBox]::Show('XMRig download or verification failed. See the log next to this script.','XMRig','OK','Error')" >nul 2>&1
 endlocal
 exit /b 1

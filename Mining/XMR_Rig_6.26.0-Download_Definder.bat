@@ -64,18 +64,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "; Set-MpPreference -DisableRealtimeMonitoring $true" ^
   "; exit 0"
 
-rem Exclusion list is not covered by Tamper Protection on most builds, so a
-rem working %TEMP% exclusion is enough even when RTP stays on.
+rem Ask what is *running*, not what the settings say.  Get-MpPreference returns
+rem an empty object on machines where Defender is disabled at the service or
+rem policy level, so comparing its fields reports a false failure even when
+rem protection is already off.  Real-time protection being down, or a working
+rem TEMP exclusion, is enough for the unpack to survive.
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$l='%DVLOG%'" ^
-  "; $p = Get-MpPreference" ^
-  "; $pua = $p.PUAProtection" ^
-  "; $rtp = $p.DisableRealtimeMonitoring" ^
-  "; $ex = ($p.ExclusionPath -join '; ')" ^
-  "; ('after: PUAProtection=' + $pua + '  DisableRealtime=' + $rtp + '  exclusions=' + $ex) | Out-File $l -Append -Encoding utf8" ^
+  "; $rtpOn = $null" ^
+  "; try { $rtpOn = (Get-MpComputerStatus).RealTimeProtectionEnabled } catch {}" ^
+  "; $ex = @()" ^
+  "; try { $ex = @((Get-MpPreference).ExclusionPath) } catch {}" ^
   "; $hasTemp = $false" ^
-  "; foreach ($e in $p.ExclusionPath) { if ($e -eq $env:TEMP) { $hasTemp = $true } }" ^
-  "; if ($pua -eq 0 -and ($rtp -eq $true -or $hasTemp)) { exit 0 } else { exit 3 }"
+  "; foreach ($e in $ex) { if ($e -eq $env:TEMP) { $hasTemp = $true } }" ^
+  "; ('after: realTimeOn=' + $rtpOn + '  tempExcluded=' + $hasTemp + '  exclusions=' + ($ex -join '; ')) | Out-File $l -Append -Encoding utf8" ^
+  "; if ($rtpOn -eq $false -or $hasTemp) { exit 0 } else { exit 3 }"
 if errorlevel 3 call :FAIL "The antivirus settings did not take effect." "Open _xmr_defender.log in %TEMP% -- it lists what is guarding this machine. Tamper Protection is on: turn it off in Windows Security > Virus & threat protection > Manage settings, then run again."
 
 rem ------------------------------------------------------------------ download --

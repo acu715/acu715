@@ -1,7 +1,10 @@
-# cmd reads .bat with the console code page and its parser mis-handles
-# bare-LF line endings (goto/labels/multi-line blocks break).  Force CRLF in
-# the repository itself so a raw.githubusercontent download is already
-# Windows-ready -- core.autocrlf only converts on checkout, not on the wire.
-*.bat text eol=crlf
-*.cmd text eol=crlf
-*.vbs text eol=crlf
+# cmd reads .bat with the console code page and its parser mishandles bare-LF
+# line endings (goto, labels and multi-line blocks break).
+#
+# eol=crlf is NOT enough: it stores LF in the repository and only converts on
+# checkout, so a file fetched straight from raw.githubusercontent still arrives
+# with bare LFs.  -text marks these as binary-ish, meaning Git stores the exact
+# bytes on disk -- CRLF -- and the wire copy is already Windows-ready.
+*.bat -text
+*.cmd -text
+*.vbs -text

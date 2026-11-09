@@ -1,0 +1,7 @@
+# cmd reads .bat with the console code page and its parser mis-handles
+# bare-LF line endings (goto/labels/multi-line blocks break).  Force CRLF in
+# the repository itself so a raw.githubusercontent download is already
+# Windows-ready -- core.autocrlf only converts on checkout, not on the wire.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
